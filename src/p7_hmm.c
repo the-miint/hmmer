@@ -1454,6 +1454,39 @@ utest_composition(ESL_GETOPTS *go, ESL_RANDOMNESS *r, ESL_ALPHABET *abc)
   return;
 }
 
+/* utest_single_consensus()
+ * miint: the consensus of a single-sequence model (as p7_SingleBuilder()
+ * makes it) is the sequence itself, all upper case, degenerate
+ * residues included. #341: SetConsensus() looked up mat[k][x] for the
+ * sequence's residue x, which for a degenerate residue (x >= K) reads
+ * past the K emissions of node k, and past the whole mat[] block at the
+ * last node; it also lower-cased residues with P(x|x) < 0.5. Fixed
+ * upstream in d92891e0. The sequence ends in X so that valgrind sees
+ * the out-of-bounds read.
+ */
+static void
+utest_single_consensus(ESL_ALPHABET *abc)
+{
+  char        msg[] = "p7_hmm.c:: single-sequence consensus unit test failed";
+  char       *seq   = "ACDEFGHIKLMNPQRSTVWYBZX";
+  P7_BG      *bg    = p7_bg_Create(abc);
+  P7_BUILDER *bld   = p7_builder_Create(NULL, abc);
+  ESL_SQ     *sq    = esl_sq_CreateFrom("single", seq, NULL, NULL, NULL);
+  P7_HMM     *hmm   = NULL;
+
+  if (bg == NULL || bld == NULL || sq == NULL)                                        esl_fatal(msg);
+  if (esl_sq_Digitize(abc, sq)                                              != eslOK) esl_fatal(msg);
+  if (p7_builder_SetScoreSystem(bld, NULL, NULL, 0.02, 0.4, bg)             != eslOK) esl_fatal(msg);
+  if (p7_Seqmodel(abc, sq->dsq, sq->n, sq->name, bld->Q, bg->f, bld->popen, bld->pextend, &hmm) != eslOK) esl_fatal(msg);
+  if (p7_hmm_SetConsensus(hmm, sq)                                          != eslOK) esl_fatal(msg);
+  if (strcmp(hmm->consensus+1, seq) != 0) esl_fatal("%s: consensus %s, expected %s", msg, hmm->consensus+1, seq);
+
+  p7_hmm_Destroy(hmm);
+  esl_sq_Destroy(sq);
+  p7_builder_Destroy(bld);
+  p7_bg_Destroy(bg);
+}
+
 #endif /*p7HMM_TESTDRIVE*/
 /*---------------------- end of unit tests -----------------------*/
 
@@ -1489,6 +1522,7 @@ main(int argc, char **argv)
 
   utest_occupancy  (go, r, abc);
   utest_composition(go, r, abc);
+  utest_single_consensus(abc);
 
   esl_alphabet_Destroy(abc);
   esl_randomness_Destroy(r);
