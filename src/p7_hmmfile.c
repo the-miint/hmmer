@@ -2300,6 +2300,78 @@ main(int argc, char **argv)
  *****************************************************************/
 #ifdef p7HMMFILE_TESTDRIVE
 
+/* replace_header_line()
+ * miint: copy of ASCII profile <s> with its first <tag> line replaced
+ * by <newline>, or removed if <newline> is NULL. Caller frees.
+ */
+static char *
+replace_header_line(const char *s, const char *tag, const char *newline)
+{
+  size_t      taglen = strlen(tag);
+  const char *p, *eol;
+  char       *buf    = NULL;
+
+  for (p = strchr(s, '\n'); p != NULL; p = strchr(p+1, '\n'))
+    if (strncmp(p+1, tag, taglen) == 0 && (p[1+taglen] == ' ' || p[1+taglen] == '\n')) break;
+  if (p == NULL || (eol = strchr(p+1, '\n')) == NULL) esl_fatal("replace_header_line(): no %s line", tag);
+
+  if (newline) { if (esl_sprintf(&buf, "%.*s%s%s", (int) (p+1-s), s, newline, eol) != eslOK) esl_fatal("replace_header_line() failed"); }
+  else         { if (esl_sprintf(&buf, "%.*s%s",   (int) (p+1-s), s, eol+1)        != eslOK) esl_fatal("replace_header_line() failed"); }
+  return buf;
+}
+
+/* utest_bad_header()
+ * miint: a malformed header in an ASCII profile must come back from
+ * p7_hmmfile_Read() as eslEFORMAT, with a message in hfp->errbuf and
+ * no model. miint parses user files in-process through
+ * p7_hmmfile_OpenBuffer(), so a bad header must never crash the host
+ * or hand back a half-built model.
+ *  - No ALPH line: the parser carried on with a NULL alphabet (fixed
+ *    upstream in 7eda1785).
+ *  - Unknown ALPH, LENG 0, LENG without a value: failed through an
+ *    error status that was never set (c2827afa, d06a8037).
+ */
+static int
+utest_bad_header(ESL_RANDOMNESS *r, ESL_ALPHABET *abc)
+{
+  char          msg[] = "bad header unit test failed";
+  struct { char *tag; char *newline; } bad[] = {
+    { "ALPH", NULL          },
+    { "ALPH", "ALPH  bogus" },
+    { "LENG", "LENG  0"     },
+    { "LENG", "LENG"        },
+  };
+  int           nbad   = sizeof(bad) / sizeof(bad[0]);
+  P7_HMM       *hmm    = NULL;
+  P7_HMMFILE   *hfp    = NULL;
+  P7_HMM       *new    = NULL;
+  ESL_ALPHABET *newabc = NULL;
+  char         *s      = NULL;
+  char         *buf    = NULL;
+  int           i, status;
+
+  if (p7_hmm_Sample(r, 20, abc, &hmm)       != eslOK) esl_fatal(msg);
+  if (p7_hmmfile_WriteToString(&s, -1, hmm) != eslOK) esl_fatal(msg);
+
+  for (i = 0; i < nbad; i++)
+    {
+      buf = replace_header_line(s, bad[i].tag, bad[i].newline);
+      if (p7_hmmfile_OpenBuffer(buf, strlen(buf), &hfp) != eslOK) esl_fatal(msg);
+      status = p7_hmmfile_Read(hfp, &newabc, &new);
+      if (status != eslEFORMAT)   esl_fatal("%s: case %d (%s): status %d, not eslEFORMAT", msg, i, bad[i].newline ? bad[i].newline : "no ALPH line", status);
+      if (new    != NULL)         esl_fatal("%s: case %d: a model came back", msg, i);
+      if (hfp->errbuf[0] == '\0') esl_fatal("%s: case %d: no error message", msg, i);
+      p7_hmmfile_Close(hfp);
+      esl_alphabet_Destroy(newabc);
+      newabc = NULL;
+      free(buf);
+    }
+
+  free(s);
+  p7_hmm_Destroy(hmm);
+  return eslOK;
+}
+
 /* utest_io_30: tests read/write for 3.0 save files.
  *              Caller provides a named tmpfile that we can
  *              open, write to, close, reopen, then read from.
@@ -2434,6 +2506,10 @@ main(int argc, char **argv)
   if ((r      = esl_randomness_CreateFast(0))  == NULL)  esl_fatal("failed to create randomness");
   if ((esl_tmpfile_named(tmpfile, &fp))        != eslOK) esl_fatal("failed to create tmp file");
   fclose(fp);
+
+  /* miint: malformed headers */
+  utest_bad_header(r, aa_abc);
+  utest_bad_header(r, nt_abc);
 
   /* Protein HMMs */
   p7_hmm_Sample(r, M, aa_abc, &hmm);
