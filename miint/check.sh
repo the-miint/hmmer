@@ -138,6 +138,38 @@ check_emcc() {
 }
 want emcc-build && check_emcc
 
+# --- ftz-daz-off: impl_Init() leaves FTZ and DAZ off ---------------------
+# FTZ (flush-to-zero) and DAZ (denormals-are-zero) are per-thread x86
+# modes that change floating point results. miint never sets them, so
+# the CLI it uses as its parity oracle must not either: miint/
+# ftzdaz_check.c calls impl_Init() and reads MXCSR back. It is built
+# with -msse3, the case where stock HMMER set DAZ regardless of
+# configure. Needs only configure's headers, not a build.
+NATIVE="$ROOT/build-miint-native"
+check_ftz_daz() {
+  local bin="$NATIVE/ftzdaz_check" out rc
+  case $(uname -m) in
+    x86_64|i?86) ;;
+    *) skip "ftz-daz-off" "not an x86 host"; return ;;
+  esac
+  mkdir -p "$NATIVE"
+  if ! step "$NATIVE/autoconf.log" bash -c "cd '$ROOT' && autoconf" ||
+     ! step "$NATIVE/configure.log" bash -c "cd '$NATIVE' && '$ROOT/configure'"; then
+    fail "ftz-daz-off" "configure failed"; return
+  fi
+  if ! step "$NATIVE/ftzdaz_check.log" ${CC:-cc} -O2 -msse3 -I"$NATIVE/src" -I"$NATIVE/easel" \
+         -I"$ROOT/src" -I"$ROOT/src/impl_sse" -I"$ROOT/easel" -o "$bin" "$ROOT/miint/ftzdaz_check.c" -lm; then
+    fail "ftz-daz-off" "could not build miint/ftzdaz_check.c"; return
+  fi
+  out=$("$bin"); rc=$?
+  case $rc in
+    0) pass "ftz-daz-off" ;;
+    1) fail "ftz-daz-off" "$out" ;;
+    *) fail "ftz-daz-off" "premise not met: $out" ;;
+  esac
+}
+want ftz-daz-off && check_ftz_daz
+
 # --- summary ------------------------------------------------------------
 echo "----"
 echo "$npass passed, $nfail failed, ${#skipped[@]} skipped"

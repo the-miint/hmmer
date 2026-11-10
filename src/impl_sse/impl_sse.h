@@ -363,7 +363,12 @@ impl_Init(void)
   _MM_SET_FLUSH_ZERO_MODE(_MM_FLUSH_ZERO_ON);
 #endif
 
-#ifdef _PMMINTRIN_H_INCLUDED
+  /* miint: upstream tested only _PMMINTRIN_H_INCLUDED, so any SSE3
+   * build (-msse3, or -march= past x86-64 v1) set DAZ whatever configure
+   * decided. Now it also takes a configure symbol, which the miint fork
+   * never defines (see configure.ac): FTZ and DAZ both stay off.
+   */
+#if defined(HAVE_DENORMALS_ZERO_MODE) && defined(_PMMINTRIN_H_INCLUDED)
   /*
    * FLUSH_ZERO doesn't necessarily work in non-SIMD calculations
    * (yes on 64-bit, maybe not of 32-bit). This ensures that those

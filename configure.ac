@@ -446,22 +446,13 @@ AC_SUBST(AVX_CFLAGS)
 AC_SUBST(AVX512_CFLAGS)
 
 
-# For x86 processors check if the flush to zero macro is available
-# in order to avoid the performance penalty dealing with sub-normal
-# values in the floating point calculations.
-if test "$impl_choice" = "sse"; then
-  AC_MSG_CHECKING([whether _MM_SET_FLUSH_ZERO_MODE is supported])
-  esl_save_cflags="$CFLAGS"
-  CFLAGS="$CFLAGS $SSE_CFLAGS"
-  AC_COMPILE_IFELSE(  [AC_LANG_PROGRAM([[#include <xmmintrin.h>]],
- 				 [[_MM_SET_FLUSH_ZERO_MODE (_MM_FLUSH_ZERO_ON);
-				 ]])],
-	[ AC_MSG_RESULT([yes])
-          AC_DEFINE([HAVE_FLUSH_ZERO_MODE], 1, [Processor supports flush-to-zero mode])],
-	[ AC_MSG_RESULT([no])]
-  )
-  CFLAGS="$esl_save_cflags"
-fi
+# miint: upstream probes here for flush-to-zero (FTZ) and defines
+# HAVE_FLUSH_ZERO_MODE, which makes impl_Init() turn FTZ on. The miint
+# fork never enables FTZ or DAZ (denormals-are-zero), so the probe is
+# gone and HAVE_FLUSH_ZERO_MODE stays #undef in p7_config.h and
+# easel/esl_config.h. FTZ/DAZ are per-thread CPU modes: miint's scores
+# must match this CLI, and miint never calls impl_Init(). Checked by
+# miint/check.sh (ftz-daz-off).
 
 # Check if the linker supports library groups for recursive libraries
 AS_IF([test "x$impl_choice" != xno],
