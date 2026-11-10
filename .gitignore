@@ -1,7 +1,9 @@
 build-*
 configure
+configure~
 config.log
 config.status
+/autom4te.cache
 Makefile
 /TAGS
 *.o
