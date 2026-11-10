@@ -1780,7 +1780,7 @@ read_asc20hmm(P7_HMMFILE *hfp, ESL_ALPHABET **ret_abc, P7_HMM **opt_hmm)
          */
         if      (strcasecmp(tok1, "nucleic") == 0) alphatype = eslDNA;
         else if (strcasecmp(tok1, "amino")   == 0) alphatype = eslAMINO;
-        else    ESL_XFAIL(status,    hfp->errbuf, "Unrecognized alphabet type %s", tok1);
+        else    ESL_XFAIL(eslEFORMAT, hfp->errbuf, "Unrecognized alphabet type %s", tok1);   // miint: was <status>, still eslOK here
 
         if (*ret_abc == NULL) {
           if ((abc = esl_alphabet_Create(alphatype))                        == NULL)  { status = eslEMEM; goto ERROR; }
@@ -1857,7 +1857,7 @@ read_asc20hmm(P7_HMMFILE *hfp, ESL_ALPHABET **ret_abc, P7_HMM **opt_hmm)
       }
 
       else if (strcmp(tag, "NULE") == 0) {
-        if (abc->type == eslUNKNOWN) ESL_XFAIL(eslEFORMAT, hfp->errbuf, "ALPH must precede NULE in HMMER2 save files");
+        if (abc == NULL || abc->type == eslUNKNOWN) ESL_XFAIL(eslEFORMAT, hfp->errbuf, "ALPH must precede NULE in HMMER2 save files");  // miint: abc == NULL dereferenced
         for (x = 0; x < abc->K; x++) {
           if ((status = esl_fileparser_GetTokenOnLine(hfp->efp, &tok1, NULL))   != eslOK)  ESL_XFAIL(eslEFORMAT, hfp->errbuf, "Too few fields on NULE line");
           null[x] = h2ascii2prob(tok1, 1./(float)abc->K);
@@ -1868,6 +1868,7 @@ read_asc20hmm(P7_HMMFILE *hfp, ESL_ALPHABET **ret_abc, P7_HMM **opt_hmm)
         break;
     } /* end, loop over possible header tags */
   if (status != eslOK) goto ERROR;
+  if (abc == NULL)     ESL_XFAIL(eslEFORMAT, hfp->errbuf, "No alphabet defined (no ALPH line?)");  // miint: as read_asc30hmm() (7eda1785); CreateBody() needs it
 
 
   /* Skip main model header lines; allocate body of HMM now that K,M are known */
@@ -2379,6 +2380,80 @@ utest_bad_header(ESL_RANDOMNESS *r, ESL_ALPHABET *abc)
   return eslOK;
 }
 
+/* utest_bad_h2_header()
+ * miint: the same requirement for HMMER2.0 profiles (read_asc20hmm()),
+ * which miint also reads. With no ALPH line, or an ALPH value other
+ * than Amino or Nucleic, the parser went on with a NULL alphabet (or an
+ * unset alphabet type) and segfaulted, before reaching its own "No
+ * ALPH" check. Not fixed upstream (checked master and develop).
+ * The unmodified profile must read back first, so the test can't pass
+ * by rejecting everything.
+ */
+static int
+utest_bad_h2_header(ESL_RANDOMNESS *r, ESL_ALPHABET *abc, char *tmpfile)
+{
+  char          msg[] = "bad HMMER2 header unit test failed";
+  struct { char *tag; char *newline; } bad[] = {
+    { "ALPH", NULL          },
+    { "ALPH", "ALPH  bogus" },
+  };
+  int           nbad   = sizeof(bad) / sizeof(bad[0]);
+  P7_HMM       *hmm    = NULL;
+  P7_HMMFILE   *hfp    = NULL;
+  P7_HMM       *new    = NULL;
+  ESL_ALPHABET *newabc = NULL;
+  FILE         *fp     = NULL;
+  char         *s      = NULL;
+  char         *buf    = NULL;
+  long          n;
+  int           i, status;
+
+  /* Write the profile in HMMER2.0 format and read the text back into <s>. */
+  if (p7_hmm_Sample(r, 20, abc, &hmm)             != eslOK) esl_fatal(msg);
+  if ((fp = fopen(tmpfile, "w"))                  == NULL)  esl_fatal(msg);
+  if (p7_h2io_WriteASCII(fp, hmm)                 != eslOK) esl_fatal(msg);
+  fclose(fp);
+  if ((fp = fopen(tmpfile, "r"))                  == NULL)  esl_fatal(msg);
+  if (fseek(fp, 0, SEEK_END) != 0 || (n = ftell(fp)) <= 0)  esl_fatal(msg);
+  rewind(fp);
+  ESL_ALLOC(s, n+1);
+  if (fread(s, 1, n, fp)                          != n)     esl_fatal(msg);
+  s[n] = '\0';
+  fclose(fp);
+
+  /* Control: unmodified, it reads. */
+  if (p7_hmmfile_OpenBuffer(s, n, &hfp)           != eslOK) esl_fatal(msg);
+  if (p7_hmmfile_Read(hfp, &newabc, &new)         != eslOK) esl_fatal("%s: unmodified HMMER2 profile didn't read: %s", msg, hfp->errbuf);
+  if (hfp->format != p7_HMMFILE_20)                         esl_fatal(msg);
+  p7_hmm_Destroy(new);
+  p7_hmmfile_Close(hfp);
+  esl_alphabet_Destroy(newabc);
+  new    = NULL;
+  newabc = NULL;
+
+  for (i = 0; i < nbad; i++)
+    {
+      buf = replace_header_line(s, bad[i].tag, bad[i].newline);
+      if (p7_hmmfile_OpenBuffer(buf, strlen(buf), &hfp) != eslOK) esl_fatal(msg);
+      status = p7_hmmfile_Read(hfp, &newabc, &new);
+      if (status != eslEFORMAT)   esl_fatal("%s: case %d (%s): status %d, not eslEFORMAT", msg, i, bad[i].newline ? bad[i].newline : "no ALPH line", status);
+      if (new    != NULL)         esl_fatal("%s: case %d: a model came back", msg, i);
+      if (hfp->errbuf[0] == '\0') esl_fatal("%s: case %d: no error message", msg, i);
+      p7_hmmfile_Close(hfp);
+      esl_alphabet_Destroy(newabc);
+      newabc = NULL;
+      free(buf);
+    }
+
+  free(s);
+  p7_hmm_Destroy(hmm);
+  return eslOK;
+
+ ERROR:
+  esl_fatal(msg);
+  return status;
+}
+
 /* utest_io_30: tests read/write for 3.0 save files.
  *              Caller provides a named tmpfile that we can
  *              open, write to, close, reopen, then read from.
@@ -2576,6 +2651,8 @@ main(int argc, char **argv)
   /* miint: malformed headers */
   utest_bad_header(r, aa_abc);
   utest_bad_header(r, nt_abc);
+  utest_bad_h2_header(r, aa_abc, tmpfile);
+  utest_bad_h2_header(r, nt_abc, tmpfile);
 
   /* Protein HMMs */
   p7_hmm_Sample(r, M, aa_abc, &hmm);
