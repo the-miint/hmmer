@@ -68,7 +68,8 @@ autoconf && ./configure && make && make check    # Easel's 87 exercises, then HM
 miint/check.sh                                   # the environment checks below; or name checks to run a subset
 ```
 
-`make check` runs the unit tests above, because they live in HMMER's own test drivers. `miint/check.sh` (run from
+`make check` runs the unit tests above, because they live in HMMER's own test drivers. One upstream exercise is
+flaky; see "Known upstream bugs left alone" below. `miint/check.sh` (run from
 any directory) covers the cases a test driver cannot set up for itself. It builds in `build-miint-*/`, which
 `build-*` keeps out of git:
 
@@ -106,13 +107,18 @@ in-process host must install one with `esl_exception_SetHandler()` before callin
 
 ## Known upstream bugs left alone
 
-None is reached by duckdb-miint, so none gets a patch here. Easel's are listed in `easel/miint/README.md`.
+duckdb-miint reaches none of these, so none gets a patch here. Easel's are listed in `easel/miint/README.md`.
 
 - `p7_hmmfile.c:315`, in `open_engine()`'s search for a pressed `.h3m` beside the named file:
   `(status = esl_sprintf(...) != eslOK)` assigns the comparison, so on an allocation failure `status` is 1
   (`eslFAIL`), not `eslEMEM`. `p7_hmmfile_OpenBuffer()` never runs it. Upstream develop is the same.
 - `impl_neon/impl_neon.h`'s `impl_Init()` has the same DAZ gate as stock `impl_sse.h` (`#ifdef
   _PMMINTRIN_H_INCLUDED`). `<pmmintrin.h>` is an x86 header, so on ARM the gate never fires.
+- **A flaky test:** `p7_hmmd_search_stats_utest` crashes in about 0.6% of runs (17 of 3000 fixed seeds), and
+  `make check` then reports exercise `p7_hmmd_search_stats` as "FAILED [crash!]". The test seeds `rand()` from
+  the clock and sometimes draws `nhits = 0`. It then asks `ESL_ALLOC` for a zero-size `hit_offsets` array, which
+  Easel treats as an exception ("zero malloc disallowed"). Rerun if it fails. The code under test is hmmpgmd's
+  serialization, which duckdb-miint does not use. Upstream develop is the same.
 
 ## Building the parity oracle
 
