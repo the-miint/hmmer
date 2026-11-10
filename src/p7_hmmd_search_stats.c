@@ -552,7 +552,9 @@ utest_serialize()
       serial[i].nreported   = rand();
       serial[i].nincluded   = rand();
 
-      if ((rand() % 2) == 0){ // 50% chance of hit_offsets array
+      // miint: an array needs nhits > 0. ESL_ALLOC() throws on a zero size,
+      // and the serialized form has no way to say "empty array" anyway.
+      if ((rand() % 2) == 0 && serial[i].nhits > 0){ // 50% chance of hit_offsets array
 	ESL_ALLOC(serial[i].hit_offsets, serial[i].nhits * sizeof(uint64_t));
 	for(j = 0; j < serial[i].nhits; j++){
 	  serial[i].hit_offsets[j] = (((uint64_t) rand()) << 32) + ((uint64_t) rand());
