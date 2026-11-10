@@ -12,7 +12,7 @@
 #include <stdio.h>
 #include <math.h>
 
-#include <x86intrin.h>
+#include <emmintrin.h>   /* miint: was <x86intrin.h>, which exists only for x86 targets; see easel/esl_sse.h */
 
 #include "easel.h"
 #include "esl_sse.h"

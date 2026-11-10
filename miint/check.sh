@@ -100,6 +100,44 @@ check_ubsan() {
 }
 want ubsan-float-cast && check_ubsan
 
+# --- emcc-build: HMMER's libraries compile for WebAssembly, SSE included -
+# duckdb-wasm builds HMMER with Emscripten, through its emulation of SSE
+# on wasm SIMD128 (-msimd128 -msse -msse2; minimap2 does the same).
+# --enable-sse makes configure fail rather than quietly drop the SSE
+# code, and the eslENABLE_SSE test confirms it. Builds the libraries a
+# program links (Easel, libdivsufsort, libhmmer with impl_sse), not the
+# programs.
+EMCC_BUILD="$ROOT/build-miint-emcc"
+check_emcc() {
+  local errs name t ok=1
+  if ! command -v emconfigure > /dev/null 2>&1; then
+    skip "emcc-build" "emconfigure not on PATH (source emsdk_env.sh)"; return
+  fi
+  name="emcc-build (emcc $(emcc --version 2>/dev/null | head -n 1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n 1))"
+  mkdir -p "$EMCC_BUILD"
+  if ! step "$EMCC_BUILD/autoconf.log" bash -c "cd '$ROOT' && autoconf" ||
+     ! step "$EMCC_BUILD/configure.log" bash -c "cd '$EMCC_BUILD' && emconfigure '$ROOT/configure' \
+         --enable-sse --disable-threads --disable-mpi CC=emcc CFLAGS='-O2 -msimd128 -msse -msse2'"; then
+    fail "$name" "configure failed"; return
+  fi
+  if ! grep -q '^#define eslENABLE_SSE 1' "$EMCC_BUILD/src/p7_config.h"; then
+    fail "$name" "configure did not enable the SSE code"; return
+  fi
+  : > "$EMCC_BUILD/make.log"
+  for t in "easel libeasel.a" "libdivsufsort libdivsufsort.a" "src libhmmer.a"; do
+    set -- $t
+    emmake make -C "$EMCC_BUILD/$1" -j8 -k "$2" >> "$EMCC_BUILD/make.log" 2>&1 || ok=0
+  done
+  if [ $ok = 0 ]; then
+    # Name the objects that failed, and where an error came in through an #include.
+    errs=$(grep -oE '\*\*\* \[[^]]*: [^] ]+\.o\]' "$EMCC_BUILD/make.log" | grep -oE '[^ ]+\.o' | sort -u | tr '\n' ' ')
+    errs+=$(grep -oE "^In file included from $ROOT/[^ ]+:[0-9]+" "$EMCC_BUILD/make.log" | sed "s|In file included from $ROOT/|; included from |" | sort -u | tr '\n' ' ')
+    fail "$name" "${errs:-make failed} (log: $EMCC_BUILD/make.log)"; return
+  fi
+  pass "$name"
+}
+want emcc-build && check_emcc
+
 # --- summary ------------------------------------------------------------
 echo "----"
 echo "$npass passed, $nfail failed, ${#skipped[@]} skipped"
