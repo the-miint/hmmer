@@ -730,7 +730,7 @@ reparameterize_model (P7_BG *bg, P7_OPROFILE *om, const ESL_SQ *sq, int start, i
 
     esl_vec_FSet (bgf_arr, om->abc->K, 0);
     status = esl_sq_CountResidues(sq, start, L, bgf_arr);
-    if (status != eslOK) p7_Fail("Invalid sequence range in reparameterize_model()\n");
+    if (status != eslOK) ESL_EXCEPTION(status, "Invalid sequence range in reparameterize_model()");  // miint: was p7_Fail(), which exits
     esl_vec_FNorm(bgf_arr, om->abc->K);
 
     for (i=0; i<K; i++) {
@@ -836,7 +836,7 @@ rescore_isolated_domain(P7_DOMAINDEF *ddef, P7_OPROFILE *om, const ESL_SQ *sq, c
   if (long_target && scores_arr!=NULL) {
     // Modify bg and om in-place to avoid having to clone (allocate) a massive
     // number of times when there are many hits
-    reparameterize_model (bg, om, sq, i, j-i+1, fwd_emissions_arr, bg_tmp->f, scores_arr);
+    if ((status = reparameterize_model (bg, om, sq, i, j-i+1, fwd_emissions_arr, bg_tmp->f, scores_arr)) != eslOK) goto ERROR;
   }
 
   p7_Forward (sq->dsq + i-1, Ld, om,      ox1, &envsc);
@@ -891,7 +891,7 @@ rescore_isolated_domain(P7_DOMAINDEF *ddef, P7_OPROFILE *om, const ESL_SQ *sq, c
       if (scores_arr!=NULL) {
         //revert bg and om back to original, then forward to new values
         reparameterize_model (bg, om, NULL, 0, 0, fwd_emissions_arr, bg_tmp->f, scores_arr);
-        reparameterize_model (bg, om, sq, i, Ld, fwd_emissions_arr, bg_tmp->f, scores_arr);
+        if ((status = reparameterize_model (bg, om, sq, i, Ld, fwd_emissions_arr, bg_tmp->f, scores_arr)) != eslOK) goto ERROR;
       }
 
       p7_Forward (sq->dsq + i-1, Ld, om,      ox1, &envsc);
