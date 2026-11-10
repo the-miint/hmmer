@@ -54,9 +54,11 @@ In an existing clone, run `git submodule update --init`.
 | `ad7e3429` | miint | `read_asc20hmm()` (HMMER2.0 profiles) rejects a missing or unknown `ALPH` with `eslEFORMAT`. Before, it segfaulted on a NULL alphabet. After `d06a8037` it also returned `eslOK` with no model for an unknown `ALPH`, because `ESL_XFAIL(status, …)` ran while `status` was still `eslOK`. Upstream develop has the same line. | `utest_bad_h2_header`: before, a segfault in `read_asc20hmm()`; with only the `eslOK` line reverted, "status 0, not eslEFORMAT". |
 | `11ab5805` | miint | `impl_sse/decoding.c` includes `<emmintrin.h>`, not `<x86intrin.h>`, which exists only on x86. | `miint/check.sh` `emcc-build`: before, the build failed at `decoding.o`. |
 | `66d3a8fb` | miint | FTZ/DAZ are never set. `configure.ac` loses its FTZ probe, so `HAVE_FLUSH_ZERO_MODE` is never defined. `impl_Init()` set DAZ in any SSE3 build (`-msse3`, or any `-march` that implies it), whatever configure decided; it now also requires `HAVE_DENORMALS_ZERO_MODE`, which nothing defines. | `miint/check.sh` `ftz-daz-off`: "FTZ on, DAZ on" before; "FTZ off, DAZ on" after the configure change alone; pass after both. |
+| `0f4f0974` | miint (test only) | `p7_hmmd_search_stats_utest` aborted in about 0.6% of runs: its clock-seeded generator sometimes asked `ESL_ALLOC` for a zero-length `hit_offsets` array, which Easel treats as an exception. It now makes an array only when `nhits > 0`, the only case the serialized form can represent. The code under test (hmmpgmd's) is unchanged. Stock 3.4 and upstream develop have the same test. | With the clock seed replaced by fixed seeds 1–3000: 17 aborts before, 0 after. |
+| `109f4e48` | miint | Points the submodule at Easel with upstream `3fd1f3f`: `esl_sq_Copy()` copies a NULL markup tag or annotation as NULL. | Easel's `utest_CopyNullMarkup`. |
 
-After those come housekeeping commits: `.gitignore` entries, a refactor of the parser tests' shared must-fail
-check into `expect_eformat()`, this README, and a submodule bump for the Easel README.
+Housekeeping commits sit among them: `.gitignore` entries, a refactor of the parser tests' shared must-fail check
+into `expect_eformat()`, this README, and a submodule bump for the Easel README.
 
 On the tutorial examples, the fork's output is identical to stock 3.4's: `hmmsearch` on `globins4`, `fn3` and
 `Pkinase`, and `nhmmer` on `MADE1`.
@@ -68,8 +70,7 @@ autoconf && ./configure && make && make check    # Easel's 87 exercises, then HM
 miint/check.sh                                   # the environment checks below; or name checks to run a subset
 ```
 
-`make check` runs the unit tests above, because they live in HMMER's own test drivers. One upstream exercise is
-flaky; see "Known upstream bugs left alone" below. `miint/check.sh` (run from
+`make check` runs the unit tests above, because they live in HMMER's own test drivers. `miint/check.sh` (run from
 any directory) covers the cases a test driver cannot set up for itself. It builds in `build-miint-*/`, which
 `build-*` keeps out of git:
 
@@ -99,26 +100,21 @@ in-process path joins this list, along with any must-check calls in `AUDIT_MUST_
 `p7_Fail()` and `p7_Die()` print and call `exit(1)`. Unlike Easel's exceptions, they have no handler a host can
 replace. This fork does not add one. Neither function is declared no-return, and their callers carry on after
 them as if they cannot return, so a handler that returned would let the callers run on with bad state. Instead,
-each site duckdb-miint can reach becomes an error return (`d396f20e`). The other `p7_Fail()`/`esl_fatal()` sites stay, because they are in
-programs' `main()`s, test drivers, or paths duckdb-miint does not run. `fatal-audit` keeps the reachable set clean.
+each site duckdb-miint can reach becomes an error return (`d396f20e`). The other `p7_Fail()`/`esl_fatal()` sites
+stay, because they are in programs' `main()`s, test drivers, or paths duckdb-miint does not run. `fatal-audit` keeps the reachable set clean.
 
 Easel's `ESL_EXCEPTION()` still aborts when no handler is installed, as the command-line programs expect. An
 in-process host must install one with `esl_exception_SetHandler()` before calling into HMMER.
 
 ## Known upstream bugs left alone
 
-duckdb-miint reaches none of these, so none gets a patch here. Easel's are listed in `easel/miint/README.md`.
+duckdb-miint reaches neither, so neither gets a patch here. Easel's is listed in `easel/miint/README.md`.
 
 - `p7_hmmfile.c:315`, in `open_engine()`'s search for a pressed `.h3m` beside the named file:
   `(status = esl_sprintf(...) != eslOK)` assigns the comparison, so on an allocation failure `status` is 1
   (`eslFAIL`), not `eslEMEM`. `p7_hmmfile_OpenBuffer()` never runs it. Upstream develop is the same.
 - `impl_neon/impl_neon.h`'s `impl_Init()` has the same DAZ gate as stock `impl_sse.h` (`#ifdef
   _PMMINTRIN_H_INCLUDED`). `<pmmintrin.h>` is an x86 header, so on ARM the gate never fires.
-- **A flaky test:** `p7_hmmd_search_stats_utest` crashes in about 0.6% of runs (17 of 3000 fixed seeds), and
-  `make check` then reports exercise `p7_hmmd_search_stats` as "FAILED [crash!]". The test seeds `rand()` from
-  the clock and sometimes draws `nhits = 0`. It then asks `ESL_ALLOC` for a zero-size `hit_offsets` array, which
-  Easel treats as an exception ("zero malloc disallowed"). Rerun if it fails. The code under test is hmmpgmd's
-  serialization, which duckdb-miint does not use. Upstream develop is the same.
 
 ## Building the parity oracle
 
