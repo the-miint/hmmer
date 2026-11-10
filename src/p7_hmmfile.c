@@ -2328,6 +2328,32 @@ replace_header_line(const char *s, const char *tag, const char *newline)
   return buf;
 }
 
+/* expect_eformat()
+ * miint: ASCII profile <s>, with its first <tag> line replaced by
+ * <newline> (removed if <newline> is NULL), must come back from
+ * p7_hmmfile_Read() as eslEFORMAT, with a message in hfp->errbuf and
+ * no model. <msg> names the calling test.
+ */
+static void
+expect_eformat(const char *msg, const char *s, const char *tag, const char *newline)
+{
+  const char   *what   = newline ? newline : "(line removed)";
+  char         *buf    = replace_header_line(s, tag, newline);
+  P7_HMMFILE   *hfp    = NULL;
+  P7_HMM       *hmm    = NULL;
+  ESL_ALPHABET *abc    = NULL;
+  int           status;
+
+  if (p7_hmmfile_OpenBuffer(buf, strlen(buf), &hfp) != eslOK) esl_fatal(msg);
+  status = p7_hmmfile_Read(hfp, &abc, &hmm);
+  if (status != eslEFORMAT)   esl_fatal("%s: %s -> %s: status %d, not eslEFORMAT", msg, tag, what, status);
+  if (hmm    != NULL)         esl_fatal("%s: %s -> %s: a model came back",         msg, tag, what);
+  if (hfp->errbuf[0] == '\0') esl_fatal("%s: %s -> %s: no error message",          msg, tag, what);
+  p7_hmmfile_Close(hfp);
+  esl_alphabet_Destroy(abc);
+  free(buf);
+}
+
 /* utest_bad_header()
  * miint: a malformed header in an ASCII profile must come back from
  * p7_hmmfile_Read() as eslEFORMAT, with a message in hfp->errbuf and
@@ -2351,29 +2377,14 @@ utest_bad_header(ESL_RANDOMNESS *r, ESL_ALPHABET *abc)
   };
   int           nbad   = sizeof(bad) / sizeof(bad[0]);
   P7_HMM       *hmm    = NULL;
-  P7_HMMFILE   *hfp    = NULL;
-  P7_HMM       *new    = NULL;
-  ESL_ALPHABET *newabc = NULL;
   char         *s      = NULL;
-  char         *buf    = NULL;
-  int           i, status;
+  int           i;
 
   if (p7_hmm_Sample(r, 20, abc, &hmm)       != eslOK) esl_fatal(msg);
   if (p7_hmmfile_WriteToString(&s, -1, hmm) != eslOK) esl_fatal(msg);
 
   for (i = 0; i < nbad; i++)
-    {
-      buf = replace_header_line(s, bad[i].tag, bad[i].newline);
-      if (p7_hmmfile_OpenBuffer(buf, strlen(buf), &hfp) != eslOK) esl_fatal(msg);
-      status = p7_hmmfile_Read(hfp, &newabc, &new);
-      if (status != eslEFORMAT)   esl_fatal("%s: case %d (%s): status %d, not eslEFORMAT", msg, i, bad[i].newline ? bad[i].newline : "no ALPH line", status);
-      if (new    != NULL)         esl_fatal("%s: case %d: a model came back", msg, i);
-      if (hfp->errbuf[0] == '\0') esl_fatal("%s: case %d: no error message", msg, i);
-      p7_hmmfile_Close(hfp);
-      esl_alphabet_Destroy(newabc);
-      newabc = NULL;
-      free(buf);
-    }
+    expect_eformat(msg, s, bad[i].tag, bad[i].newline);
 
   free(s);
   p7_hmm_Destroy(hmm);
@@ -2404,7 +2415,6 @@ utest_bad_h2_header(ESL_RANDOMNESS *r, ESL_ALPHABET *abc, char *tmpfile)
   ESL_ALPHABET *newabc = NULL;
   FILE         *fp     = NULL;
   char         *s      = NULL;
-  char         *buf    = NULL;
   long          n;
   int           i, status;
 
@@ -2428,22 +2438,8 @@ utest_bad_h2_header(ESL_RANDOMNESS *r, ESL_ALPHABET *abc, char *tmpfile)
   p7_hmm_Destroy(new);
   p7_hmmfile_Close(hfp);
   esl_alphabet_Destroy(newabc);
-  new    = NULL;
-  newabc = NULL;
-
   for (i = 0; i < nbad; i++)
-    {
-      buf = replace_header_line(s, bad[i].tag, bad[i].newline);
-      if (p7_hmmfile_OpenBuffer(buf, strlen(buf), &hfp) != eslOK) esl_fatal(msg);
-      status = p7_hmmfile_Read(hfp, &newabc, &new);
-      if (status != eslEFORMAT)   esl_fatal("%s: case %d (%s): status %d, not eslEFORMAT", msg, i, bad[i].newline ? bad[i].newline : "no ALPH line", status);
-      if (new    != NULL)         esl_fatal("%s: case %d: a model came back", msg, i);
-      if (hfp->errbuf[0] == '\0') esl_fatal("%s: case %d: no error message", msg, i);
-      p7_hmmfile_Close(hfp);
-      esl_alphabet_Destroy(newabc);
-      newabc = NULL;
-      free(buf);
-    }
+    expect_eformat(msg, s, bad[i].tag, bad[i].newline);
 
   free(s);
   p7_hmm_Destroy(hmm);
