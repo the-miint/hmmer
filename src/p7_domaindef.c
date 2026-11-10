@@ -979,8 +979,91 @@ rescore_isolated_domain(P7_DOMAINDEF *ddef, P7_OPROFILE *om, const ESL_SQ *sq, c
   p7_trace_Reuse(ddef->tr);
   return status;
 }
-  
-    
+
+
+/*****************************************************************
+ * miint: unit tests.
+ *****************************************************************/
+#ifdef p7DOMAINDEF_TESTDRIVE
+
+/* set_cumulative()
+ * Fill ddef->btot[0..L] and ddef->etot[0..L] from per-residue
+ * expectations: bocc[y] = expected number of domains whose first
+ * residue is y, eocc[y] = ... whose last residue is y (y = 1..L).
+ */
+static void
+set_cumulative(P7_DOMAINDEF *ddef, const float *bocc, const float *eocc, int L)
+{
+  int y;
+
+  ddef->btot[0] = ddef->etot[0] = 0.;
+  for (y = 1; y <= L; y++)
+    {
+      ddef->btot[y] = ddef->btot[y-1] + bocc[y];
+      ddef->etot[y] = ddef->etot[y-1] + eocc[y];
+    }
+}
+
+/* utest_multidomain_region()
+ * is_multidomain_region(ddef, i, j) asks whether, at some residue z,
+ * a domain ends at or before z and another starts after z. #348: it
+ * counted a domain whose first residue is z as starting after z. So a
+ * region holding one domain that starts and ends on the same residue
+ * was called multidomain, and domain definition went on to split it.
+ * Fixed upstream in a37e75bb. The other cases hold before and after.
+ */
+static void
+utest_multidomain_region(void)
+{
+  char          msg[] = "p7_domaindef.c:: multidomain region unit test failed";
+  P7_DOMAINDEF *ddef  = p7_domaindef_Create(NULL);
+  int           L     = 10;
+  float         bocc[11];
+  float         eocc[11];
+
+  if (ddef == NULL) esl_fatal(msg);
+
+  /* Two domains, residues 2..5 and 6..9: multidomain. */
+  esl_vec_FSet(bocc, L+1, 0.);  esl_vec_FSet(eocc, L+1, 0.);
+  bocc[2] = 1.;  eocc[5] = 1.;
+  bocc[6] = 1.;  eocc[9] = 1.;
+  set_cumulative(ddef, bocc, eocc, L);
+  if (! is_multidomain_region(ddef, 1, L)) esl_fatal("%s: two domains, 2..5 and 6..9, not seen as multidomain", msg);
+
+  /* One domain, residues 2..9: not multidomain. */
+  esl_vec_FSet(bocc, L+1, 0.);  esl_vec_FSet(eocc, L+1, 0.);
+  bocc[2] = 1.;  eocc[9] = 1.;
+  set_cumulative(ddef, bocc, eocc, L);
+  if (is_multidomain_region(ddef, 1, L))   esl_fatal("%s: one domain, 2..9, seen as multidomain", msg);
+
+  /* One domain, residue 5 alone: not multidomain (#348). */
+  esl_vec_FSet(bocc, L+1, 0.);  esl_vec_FSet(eocc, L+1, 0.);
+  bocc[5] = 1.;  eocc[5] = 1.;
+  set_cumulative(ddef, bocc, eocc, L);
+  if (is_multidomain_region(ddef, 1, L))   esl_fatal("%s: one domain, 5..5, seen as multidomain", msg);
+
+  p7_domaindef_Destroy(ddef);
+}
+
+#endif /*p7DOMAINDEF_TESTDRIVE*/
+
+
+/*****************************************************************
+ * miint: test driver.
+ *****************************************************************/
+#ifdef p7DOMAINDEF_TESTDRIVE
+/* gcc -o p7_domaindef_utest -g -Wall -I../easel -L../easel -I. -L. -Dp7DOMAINDEF_TESTDRIVE p7_domaindef.c -lhmmer -leasel -lm
+ * ./p7_domaindef_utest
+ */
+int
+main(int argc, char **argv)
+{
+  utest_multidomain_region();
+  return 0;
+}
+#endif /*p7DOMAINDEF_TESTDRIVE*/
+
+
 /*****************************************************************
  * Example driver.
  *****************************************************************/
