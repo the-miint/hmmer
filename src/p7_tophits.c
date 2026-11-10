@@ -775,6 +775,44 @@ workaround_bug_h74(P7_TOPHITS *th)
   return eslOK;
 }
 
+/* Function:  p7_hit_IsDuplicateDomain()
+ * Synopsis:  Is domain <d> a bug #h74 duplicate that the report hides?
+ *
+ * Purpose:   miint: return TRUE if domain <d> of <hit> is one that
+ *            p7_tophits_Threshold() un-reports and un-includes as a
+ *            duplicate alignment (bug #h74; see workaround_bug_h74()
+ *            above), FALSE otherwise. That happens only when
+ *            <hit->noverlaps> is nonzero: then a domain with the same
+ *            alignment endpoints (iali, jali) as another loses to an
+ *            earlier one with a bit score >= its own, or to a later one
+ *            unless its own score is >= the later one's.
+ *
+ *            This is the per-hit, side-effect-free form of
+ *            workaround_bug_h74(), for a caller that reports domains
+ *            itself instead of calling p7_tophits_Threshold(). It
+ *            matches that function exactly, NaN scores included, and
+ *            doesn't depend on the domains' reported/included flags.
+ *
+ * Args:      hit - a hit, with domains hit->dcl[0..ndom-1]
+ *            d   - domain index, 0..hit->ndom-1
+ *
+ * Returns:   TRUE or FALSE.
+ */
+int
+p7_hit_IsDuplicateDomain(const P7_HIT *hit, int d)
+{
+  int e;
+
+  if (! hit->noverlaps) return FALSE;
+  for (e = 0; e < hit->ndom; e++)
+    {
+      if (e == d || hit->dcl[e].iali != hit->dcl[d].iali || hit->dcl[e].jali != hit->dcl[d].jali) continue;
+      if (e < d &&    hit->dcl[e].bitscore >= hit->dcl[d].bitscore)  return TRUE;  // pair (e,d): e kept on >=
+      if (e > d && ! (hit->dcl[d].bitscore >= hit->dcl[e].bitscore)) return TRUE;  // pair (d,e): d kept only on >=
+    }
+  return FALSE;
+}
+
 
 
 /* Function:  p7_tophits_ComputeNhmmerEvalues()
@@ -2193,6 +2231,128 @@ static ESL_OPTIONS options[] = {
 static char usage[]  = "[-options]";
 static char banner[] = "test driver for P7_TOPHITS";
 
+/* add_hit_with_domains()
+ * miint: append a hit with <ndom> domains, all reported and included,
+ * at alignment coords iali[d]..jali[d] with bit score sc[d].
+ */
+static P7_HIT *
+add_hit_with_domains(P7_TOPHITS *th, int noverlaps, int ndom, const int *iali, const int *jali, const float *sc)
+{
+  P7_HIT *hit = NULL;
+  int     d, status;
+
+  if (p7_tophits_CreateNextHit(th, &hit) != eslOK) esl_fatal("add_hit_with_domains() failed");
+  ESL_ALLOC(hit->dcl, sizeof(P7_DOMAIN) * ndom);
+  memset(hit->dcl, 0, sizeof(P7_DOMAIN) * ndom);
+  hit->ndom      = ndom;
+  hit->noverlaps = noverlaps;
+  hit->nreported = hit->nincluded = ndom;
+  hit->sortkey   = (double) th->N;   // distinct, so sorting fills th->hit[] in a known order
+  for (d = 0; d < ndom; d++)
+    {
+      hit->dcl[d].iali        = iali[d];
+      hit->dcl[d].jali        = jali[d];
+      hit->dcl[d].bitscore    = sc[d];
+      hit->dcl[d].is_reported = TRUE;
+      hit->dcl[d].is_included = TRUE;
+    }
+  return hit;
+
+ ERROR:
+  esl_fatal("add_hit_with_domains() failed");
+  return NULL;
+}
+
+/* utest_duplicate_domains()
+ * miint: p7_hit_IsDuplicateDomain(hit, d) must say exactly which domains
+ * p7_tophits_Threshold() hides as bug #h74 duplicates (identical
+ * alignment endpoints from different envelopes; workaround_bug_h74()).
+ * miint streams domains and never calls Threshold(), so it asks this
+ * per hit instead; any difference would report a domain hmmsearch hides,
+ * or hide one it reports.
+ */
+static void
+utest_duplicate_domains(ESL_RANDOMNESS *r)
+{
+  char        msg[] = "duplicate domains unit test failed";
+  P7_TOPHITS *th    = p7_tophits_Create();
+  int         iali[6], jali[6];
+  float       sc[6];
+  int        *dup;
+  int         h, d, n, nhits = 500;
+  int         status;
+
+  /* Documented case: three domains with the same endpoints, scores 5, 7, 7.
+   * The best is kept; of equal scores, the earlier. With noverlaps == 0 the
+   * workaround doesn't apply at all.
+   */
+  for (d = 0; d < 3; d++) { iali[d] = 10; jali[d] = 50; }
+  sc[0] = 5.;  sc[1] = 7.;  sc[2] = 7.;
+  add_hit_with_domains(th, 1, 3, iali, jali, sc);
+  add_hit_with_domains(th, 0, 3, iali, jali, sc);
+  if (! p7_hit_IsDuplicateDomain(&(th->unsrt[0]), 0)) esl_fatal("%s: lower-scoring duplicate kept", msg);
+  if (  p7_hit_IsDuplicateDomain(&(th->unsrt[0]), 1)) esl_fatal("%s: best duplicate (earlier of a tie) hidden", msg);
+  if (! p7_hit_IsDuplicateDomain(&(th->unsrt[0]), 2)) esl_fatal("%s: later of a tie kept", msg);
+  for (d = 0; d < 3; d++)
+    if (p7_hit_IsDuplicateDomain(&(th->unsrt[1]), d)) esl_fatal("%s: domain hidden although noverlaps == 0", msg);
+
+  /* A NaN score in a pair: NaN >= x and x >= NaN are both false, so the
+   * workaround hides the earlier domain whichever one is the NaN.
+   */
+  sc[0] = NAN;  sc[1] = 3.;
+  add_hit_with_domains(th, 1, 2, iali, jali, sc);
+  sc[0] = 3.;   sc[1] = NAN;
+  add_hit_with_domains(th, 1, 2, iali, jali, sc);
+  for (h = 2; h <= 3; h++)
+    {
+      if (! p7_hit_IsDuplicateDomain(&(th->unsrt[h]), 0)) esl_fatal("%s: NaN pair: earlier domain kept", msg);
+      if (  p7_hit_IsDuplicateDomain(&(th->unsrt[h]), 1)) esl_fatal("%s: NaN pair: later domain hidden", msg);
+    }
+
+  /* Random hits whose coords and scores come from small sets, so that
+   * duplicates and tied scores are common.
+   */
+  for (h = 0; h < nhits; h++)
+    {
+      n = 1 + esl_rnd_Roll(r, 6);
+      for (d = 0; d < n; d++)
+        {
+          iali[d] = 1 + esl_rnd_Roll(r, 3);
+          jali[d] = 100 + esl_rnd_Roll(r, 2);
+          sc[d]   = (float) esl_rnd_Roll(r, 4);
+        }
+      add_hit_with_domains(th, esl_rnd_Roll(r, 4) ? 1 : 0, n, iali, jali, sc);
+    }
+
+  /* Ask first, then let the workaround mark the same hits, and compare. */
+  ESL_ALLOC(dup, sizeof(int) * th->N * 6);
+  for (h = 0; h < th->N; h++)
+    for (d = 0; d < th->unsrt[h].ndom; d++)
+      dup[h*6+d] = p7_hit_IsDuplicateDomain(&(th->unsrt[h]), d);
+
+  p7_tophits_SortBySortkey(th);
+  workaround_bug_h74(th);
+
+  for (h = 0; h < th->N; h++)
+    {
+      n = 0;
+      for (d = 0; d < th->unsrt[h].ndom; d++)
+        {
+          if (th->unsrt[h].dcl[d].is_reported == dup[h*6+d]) esl_fatal("%s: hit %d domain %d: workaround %s it, IsDuplicateDomain says %d", msg, h, d, th->unsrt[h].dcl[d].is_reported ? "kept" : "hid", dup[h*6+d]);
+          if (th->unsrt[h].dcl[d].is_included == dup[h*6+d]) esl_fatal("%s: hit %d domain %d: inclusion differs", msg, h, d);
+          n += dup[h*6+d];
+        }
+      if (th->unsrt[h].nreported != th->unsrt[h].ndom - n) esl_fatal("%s: hit %d: nreported %d, expected %d", msg, h, th->unsrt[h].nreported, th->unsrt[h].ndom - n);
+    }
+
+  free(dup);
+  p7_tophits_Destroy(th);
+  return;
+
+ ERROR:
+  esl_fatal(msg);
+}
+
 int
 main(int argc, char **argv)
 {
@@ -2211,6 +2371,8 @@ main(int argc, char **argv)
   h1 = p7_tophits_Create();
   h2 = p7_tophits_Create();
   h3 = p7_tophits_Create();
+
+  utest_duplicate_domains(r);   /* miint */
   
   for (i = 0; i < N; i++) 
   {
