@@ -1475,6 +1475,7 @@ read_asc30hmm(P7_HMMFILE *hfp, ESL_ALPHABET **ret_abc, P7_HMM **opt_hmm)
 
   if (status != eslOK)           goto ERROR;
   if (! saw_alph || !abc)        ESL_XFAIL(eslEFORMAT, hfp->errbuf, "No alphabet defined (no ALPH line?)");
+  if (hmm->M <= 0)               ESL_XFAIL(eslEFORMAT, hfp->errbuf, "No LENG found for HMM (or LENG <= 0)");  // miint: checked here, not just at the end; CreateBody() throws on M=0
 
   /* If we saw one STATS line, we need all 3. (True for both 3/a and 3/b formats) */
   if      (statstracker == 0x7) hmm->flags |= p7H_STATS;
@@ -1873,6 +1874,7 @@ read_asc20hmm(P7_HMMFILE *hfp, ESL_ALPHABET **ret_abc, P7_HMM **opt_hmm)
     } /* end, loop over possible header tags */
   if (status != eslOK) goto ERROR;
   if (abc == NULL)     ESL_XFAIL(eslEFORMAT, hfp->errbuf, "No alphabet defined (no ALPH line?)");  // miint: as read_asc30hmm() (7eda1785); CreateBody() needs it
+  if (hmm->M <= 0)     ESL_XFAIL(eslEFORMAT, hfp->errbuf, "No LENG found for HMM (or LENG <= 0)");  // miint: checked here, not just at the end; CreateBody() throws on M=0
 
 
   /* Skip main model header lines; allocate body of HMM now that K,M are known */
