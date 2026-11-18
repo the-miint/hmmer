@@ -56,6 +56,12 @@ In an existing clone, run `git submodule update --init`.
 | `66d3a8fb` | miint | FTZ/DAZ are never set. `configure.ac` loses its FTZ probe, so `HAVE_FLUSH_ZERO_MODE` is never defined. `impl_Init()` set DAZ in any SSE3 build (`-msse3`, or any `-march` that implies it), whatever configure decided; it now also requires `HAVE_DENORMALS_ZERO_MODE`, which nothing defines. | `miint/check.sh` `ftz-daz-off`: "FTZ on, DAZ on" before; "FTZ off, DAZ on" after the configure change alone; pass after both. |
 | `0f4f0974` | miint (test only) | `p7_hmmd_search_stats_utest` aborted in about 0.6% of runs: its clock-seeded generator sometimes asked `ESL_ALLOC` for a zero-length `hit_offsets` array, which Easel treats as an exception. It now makes an array only when `nhits > 0`, the only case the serialized form can represent. The code under test (hmmpgmd's) is unchanged. Stock 3.4 and upstream develop have the same test. | With the clock seed replaced by fixed seeds 1–3000: 17 aborts before, 0 after. |
 | `109f4e48` | miint | Points the submodule at Easel with upstream `3fd1f3f`: `esl_sq_Copy()` copies a NULL markup tag or annotation as NULL. | Easel's `utest_CopyNullMarkup`. |
+| `5d376721` | miint (tests only) | The tests for the five parser patches below, which each fail before their patch. `fatal-audit` gains the read path (below). | Each test fails before its patch, with the output given in that patch's row. |
+| `dbabbcf7` | miint | `read_asc30hmm()` rejects a GA, TC or NC line ahead of the ALPH line with `eslEFORMAT`. A cutoff line holds one value for a DNA or RNA model and two otherwise, so the parser reads the alphabet type there; before ALPH that alphabet was NULL. | `utest_cutoff_before_alph`: before, a segfault. |
+| `03533844` | miint | `read_asc30hmm()` rejects `ALPH custom` with `eslEFORMAT`. `esl_abc_EncodeType()` maps "custom" to `eslNONSTANDARD`, not `eslUNKNOWN`, and `esl_alphabet_Create()` then called `esl_fatal()`, exiting the process. | `utest_bad_header`: before, an exit with "bad alphabet type: unrecognized". |
+| `783504b5` | miint | Both text parsers check for a LENG line before `p7_hmm_CreateBody()`, which throws on M=0. The check used to run only after the body was parsed. | `utest_bad_header` and `utest_bad_h2_header`: before, an abort with "model length M=0 out of range 1..100000". |
+| `a97dc15c` | miint | `read_asc20hmm()` requires a NULE line. Without one, the null emissions that convert a HMMER2 profile's match scores were used uninitialized. | `utest_bad_h2_header`: before, calibration aborted on "forward score is NaN"; valgrind traces the uninitialised values to `read_asc20hmm()`'s stack. |
+| `cfa5ea0e` | miint | `read_asc30hmm()` rejects an MM line in a file older than HMMER3/f. Only 3/f files carry the per-node MM column, so in an older file `MM yes` left `mm[1..M]` uninitialized, and the read returned `eslOK`. | `utest_mm_before_3f`: before, "status 0, not eslEFORMAT". |
 
 Housekeeping commits sit among them: `.gitignore` entries, a refactor of the parser tests' shared must-fail check
 into `expect_eformat()`, this README, and a submodule bump for the Easel README.
@@ -91,9 +97,17 @@ fails. Easel's environment checks are in `easel/miint/check.sh`. The two scripts
 
 - `src/p7_domaindef.c`: `reparameterize_model`, `rescore_isolated_domain`
 - `src/p7_pipeline.c`: `p7_Pipeline`, `p7_pli_postViterbi_LongTarget`
+- `src/p7_hmmfile.c`: `p7_hmmfile_OpenBuffer`, `p7_hmmfile_Read`, `read_asc30hmm`, `read_asc20hmm`
+- `src/p7_hmm.c`: `p7_hmm_CreateShell`, `p7_hmm_CreateBody`, `p7_hmm_SetConsensus`
+- `src/evalues.c`: `p7_Calibrate` (a HMMER2 profile is calibrated on read)
 
-These are the paths patched so far. As duckdb-miint reaches more of HMMER, each function it adds to its
-in-process path joins this list, along with any must-check calls in `AUDIT_MUST_CHECK`.
+The first four are the search paths patched first. The rest are the profile parser that duckdb-miint reads models
+with. As duckdb-miint reaches more of HMMER, each function it adds to its in-process path joins this list, along
+with any must-check calls in `AUDIT_MUST_CHECK`.
+
+The check reads only the bodies of the functions listed, not their callees. It would not have caught the `ALPH
+custom` exit (`03533844`), which happened one call down, inside Easel's `esl_alphabet_Create()`. That
+`esl_fatal()` stays: the parser no longer passes it a type it rejects. The unit tests cover such cases.
 
 ### Why no `p7_Fail` handler
 
@@ -108,8 +122,16 @@ in-process host must install one with `esl_exception_SetHandler()` before callin
 
 ## Known upstream bugs left alone
 
-duckdb-miint reaches neither, so neither gets a patch here. Easel's is listed in `easel/miint/README.md`.
+duckdb-miint reaches none of these, or guards against it itself, so none gets a patch here. Easel's are listed in
+`easel/miint/README.md`.
 
+- `p7_hmmfile.c:1272` (`read_asc30hmm()`) and `:1740` (`read_asc20hmm()`): reading a second model from a
+  `p7_hmmfile_OpenBuffer()` handle calls `ftello(hfp->f)` with `hfp->f == NULL`, a segfault. Buffer mode sets
+  neither `do_stdin` nor `do_gzip`, so the guard on that call doesn't apply. The only in-tree caller of
+  `OpenBuffer()` (hmmpgmd) reads one model. duckdb-miint splits a file at its `//` lines and parses one model per
+  buffer. Upstream develop is the same.
+- `p7_hmmfile.c:1888` (`read_asc20hmm()`): if `p7_bg_Create()` fails (out of memory), the parser returns
+  `eslOK` with no model. duckdb-miint treats an `eslOK` read that returns no model as an error.
 - `p7_hmmfile.c:315`, in `open_engine()`'s search for a pressed `.h3m` beside the named file:
   `(status = esl_sprintf(...) != eslOK)` assigns the comparison, so on an allocation failure `status` is 1
   (`eslFAIL`), not `eslEMEM`. `p7_hmmfile_OpenBuffer()` never runs it. Upstream develop is the same.
