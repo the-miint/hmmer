@@ -1320,7 +1320,8 @@ read_asc30hmm(P7_HMMFILE *hfp, ESL_ALPHABET **ret_abc, P7_HMM **opt_hmm)
 
       else if (strcmp(tag, "ALPH") == 0) {
 	if ((status = esl_fileparser_GetTokenOnLine(hfp->efp, &tok1, NULL))  != eslOK)   ESL_XFAIL(eslEFORMAT, hfp->errbuf, "No alphabet type found on ALPH");
-	if ((alphatype = esl_abc_EncodeType(tok1))                        == eslUNKNOWN) ESL_XFAIL(eslEFORMAT, hfp->errbuf, "Unrecognized alphabet type %s", tok1);
+	alphatype = esl_abc_EncodeType(tok1);
+	if (alphatype == eslUNKNOWN || alphatype == eslNONSTANDARD)                     ESL_XFAIL(eslEFORMAT, hfp->errbuf, "Unrecognized alphabet type %s", tok1);  // miint: "custom" is eslNONSTANDARD, which esl_alphabet_Create() exits on
 	if (*ret_abc == NULL) {
 	  if ((abc = esl_alphabet_Create(alphatype))                        == NULL)     { status = eslEMEM; goto ERROR; }
 	} else {
