@@ -1430,6 +1430,7 @@ read_asc30hmm(P7_HMMFILE *hfp, ESL_ALPHABET **ret_abc, P7_HMM **opt_hmm)
       }
 
       else if (strcmp(tag, "GA") == 0) {
+        if (abc == NULL)                                                                 ESL_XFAIL(eslEFORMAT, hfp->errbuf, "ALPH must precede GA");  // miint: abc == NULL dereferenced below
         if ((status = esl_fileparser_GetTokenOnLine(hfp->efp, &tok1, NULL))   != eslOK)  ESL_XFAIL(eslEFORMAT, hfp->errbuf, "Too few fields on GA line");
         hmm->cutoff[p7_GA1] = atof(tok1);
         if ( (abc->type == eslDNA || abc->type == eslRNA) ) { //if DNA, there's no need for a 2nd value (domain GA)
@@ -1442,6 +1443,7 @@ read_asc30hmm(P7_HMMFILE *hfp, ESL_ALPHABET **ret_abc, P7_HMM **opt_hmm)
       }
 
       else if (strcmp(tag, "TC") == 0) {
+        if (abc == NULL)                                                                 ESL_XFAIL(eslEFORMAT, hfp->errbuf, "ALPH must precede TC");  // miint: abc == NULL dereferenced below
         if ((status = esl_fileparser_GetTokenOnLine(hfp->efp, &tok1, NULL))   != eslOK)  ESL_XFAIL(eslEFORMAT, hfp->errbuf, "Too few fields on TC line");
         hmm->cutoff[p7_TC1] = atof(tok1);
         if ( (abc->type == eslDNA || abc->type == eslRNA) ) { //if DNA, there's no need for a 2nd value (domain GA)
@@ -1454,6 +1456,7 @@ read_asc30hmm(P7_HMMFILE *hfp, ESL_ALPHABET **ret_abc, P7_HMM **opt_hmm)
       }
 
       else if (strcmp(tag, "NC") == 0) {
+        if (abc == NULL)                                                                 ESL_XFAIL(eslEFORMAT, hfp->errbuf, "ALPH must precede NC");  // miint: abc == NULL dereferenced below
         if ((status = esl_fileparser_GetTokenOnLine(hfp->efp, &tok1, NULL))   != eslOK)  ESL_XFAIL(eslEFORMAT, hfp->errbuf, "Too few fields on NC line");
         hmm->cutoff[p7_NC1] = atof(tok1);
         if ( (abc->type == eslDNA || abc->type == eslRNA) ) { //if DNA, there's no need for a 2nd value (domain GA)
