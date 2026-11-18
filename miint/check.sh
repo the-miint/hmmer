@@ -45,14 +45,25 @@ build() { # dir configure-args...
 # as a status (and, for an exception, through Easel's handler), never
 # exit() or abort() the host. p7_Fail()/p7_Die()/esl_fatal() exit; and a
 # call whose failing status is dropped carries on with a NULL or stale
-# result. This lists both in the functions listed below: the paths
-# patched in M0 (each later milestone adds the functions it reaches).
+# result. This lists both in the functions listed below: the search
+# paths patched in M0, and the profile parser miint reads models with,
+# from p7_hmmfile_OpenBuffer() through p7_Calibrate() (which a HMMER2
+# profile runs on read). Each later milestone adds the functions it
+# reaches.
 #   <file>:<function>
 AUDIT_FUNCS="
 src/p7_domaindef.c:reparameterize_model
 src/p7_domaindef.c:rescore_isolated_domain
 src/p7_pipeline.c:p7_Pipeline
 src/p7_pipeline.c:p7_pli_postViterbi_LongTarget
+src/p7_hmmfile.c:p7_hmmfile_OpenBuffer
+src/p7_hmmfile.c:p7_hmmfile_Read
+src/p7_hmmfile.c:read_asc30hmm
+src/p7_hmmfile.c:read_asc20hmm
+src/p7_hmm.c:p7_hmm_CreateShell
+src/p7_hmm.c:p7_hmm_CreateBody
+src/p7_hmm.c:p7_hmm_SetConsensus
+src/evalues.c:p7_Calibrate
 "
 # Calls whose status must be checked; a bare statement drops it.
 # reparameterize_model() can only fail when given a sequence (sq).

@@ -2364,16 +2364,26 @@ expect_eformat(const char *msg, const char *s, const char *tag, const char *newl
  *    upstream in 7eda1785).
  *  - Unknown ALPH, LENG 0, LENG without a value: failed through an
  *    error status that was never set (c2827afa, d06a8037).
+ *  - ALPH custom: esl_abc_EncodeType() maps it to eslNONSTANDARD, not
+ *    eslUNKNOWN, and esl_alphabet_Create() then called esl_fatal(),
+ *    which exits the process.
+ *  - No LENG line: the parser called p7_hmm_CreateBody() with M=0,
+ *    which throws an exception (an abort, with no handler) before the
+ *    parser's own "No LENG" check is reached.
+ *  Neither of the last two is fixed upstream (checked HMMER develop
+ *  3221e22a and Easel develop e50facd).
  */
 static int
 utest_bad_header(ESL_RANDOMNESS *r, ESL_ALPHABET *abc)
 {
   char          msg[] = "bad header unit test failed";
   struct { char *tag; char *newline; } bad[] = {
-    { "ALPH", NULL          },
-    { "ALPH", "ALPH  bogus" },
-    { "LENG", "LENG  0"     },
-    { "LENG", "LENG"        },
+    { "ALPH", NULL           },
+    { "ALPH", "ALPH  bogus"  },
+    { "LENG", "LENG  0"      },
+    { "LENG", "LENG"         },
+    { "ALPH", "ALPH  custom" },
+    { "LENG", NULL           },
   };
   int           nbad   = sizeof(bad) / sizeof(bad[0]);
   P7_HMM       *hmm    = NULL;
@@ -2397,6 +2407,10 @@ utest_bad_header(ESL_RANDOMNESS *r, ESL_ALPHABET *abc)
  * than Amino or Nucleic, the parser went on with a NULL alphabet (or an
  * unset alphabet type) and segfaulted, before reaching its own "No
  * ALPH" check. Not fixed upstream (checked master and develop).
+ * With no NULE line, the null emissions that convert the match scores
+ * were left uninitialized and used, and the read returned eslOK. With
+ * no LENG line, p7_hmm_CreateBody() threw on M=0, as in 3.x files.
+ * Neither is fixed upstream (checked develop 3221e22a).
  * The unmodified profile must read back first, so the test can't pass
  * by rejecting everything.
  */
@@ -2407,6 +2421,8 @@ utest_bad_h2_header(ESL_RANDOMNESS *r, ESL_ALPHABET *abc, char *tmpfile)
   struct { char *tag; char *newline; } bad[] = {
     { "ALPH", NULL          },
     { "ALPH", "ALPH  bogus" },
+    { "NULE", NULL          },
+    { "LENG", NULL          },
   };
   int           nbad   = sizeof(bad) / sizeof(bad[0]);
   P7_HMM       *hmm    = NULL;
@@ -2448,6 +2464,80 @@ utest_bad_h2_header(ESL_RANDOMNESS *r, ESL_ALPHABET *abc, char *tmpfile)
  ERROR:
   esl_fatal(msg);
   return status;
+}
+
+/* utest_cutoff_before_alph()
+ * miint: a GA, TC or NC line ahead of the ALPH line must come back as
+ * eslEFORMAT. Those lines hold one value for a DNA or RNA model and two
+ * otherwise, so the parser reads the alphabet type there, and it
+ * dereferenced a NULL alphabet when no ALPH line had been seen yet.
+ * Not fixed upstream (checked develop 3221e22a).
+ */
+static int
+utest_cutoff_before_alph(ESL_RANDOMNESS *r, ESL_ALPHABET *abc)
+{
+  char          msg[]  = "cutoff-before-ALPH unit test failed";
+  char         *tags[] = { "GA", "TC", "NC" };
+  int           ntags  = sizeof(tags) / sizeof(tags[0]);
+  P7_HMM       *hmm    = NULL;
+  char         *s      = NULL;
+  char         *line   = NULL;
+  int           i;
+
+  if (p7_hmm_Sample(r, 20, abc, &hmm)       != eslOK) esl_fatal(msg);
+  if (p7_hmmfile_WriteToString(&s, -1, hmm) != eslOK) esl_fatal(msg);
+
+  for (i = 0; i < ntags; i++)
+    {
+      if (esl_sprintf(&line, "%s    25.00 25.00\nALPH  %s", tags[i], esl_abc_DecodeType(abc->type)) != eslOK) esl_fatal(msg);
+      expect_eformat(msg, s, "ALPH", line);
+      free(line);
+      line = NULL;
+    }
+
+  free(s);
+  p7_hmm_Destroy(hmm);
+  return eslOK;
+}
+
+/* utest_mm_before_3f()
+ * miint: an MM line in a file older than HMMER3/f must come back as
+ * eslEFORMAT. The parser set the model-mask flag from the header, but
+ * reads the per-node MM column only in 3/f files, so mm[1..M] was left
+ * uninitialized and the read returned eslOK. Not fixed upstream
+ * (checked develop 3221e22a).
+ * The unmodified 3/e profile must read back first, so the test can't
+ * pass by rejecting every 3/e file.
+ */
+static int
+utest_mm_before_3f(ESL_RANDOMNESS *r, ESL_ALPHABET *abc)
+{
+  char          msg[]  = "MM-before-3/f unit test failed";
+  P7_HMM       *hmm    = NULL;
+  P7_HMMFILE   *hfp    = NULL;
+  P7_HMM       *new    = NULL;
+  ESL_ALPHABET *newabc = NULL;
+  char         *s      = NULL;
+  char         *line   = NULL;
+
+  if (p7_hmm_Sample(r, 20, abc, &hmm)                    != eslOK) esl_fatal(msg);
+  if (p7_hmmfile_WriteToString(&s, p7_HMMFILE_3e, hmm)   != eslOK) esl_fatal(msg);
+
+  /* Control: unmodified, it reads, as a 3/e file. */
+  if (p7_hmmfile_OpenBuffer(s, strlen(s), &hfp)          != eslOK) esl_fatal(msg);
+  if (p7_hmmfile_Read(hfp, &newabc, &new)                != eslOK) esl_fatal("%s: unmodified 3/e profile didn't read: %s", msg, hfp->errbuf);
+  if (hfp->format != p7_HMMFILE_3e)                                esl_fatal(msg);
+  p7_hmm_Destroy(new);
+  p7_hmmfile_Close(hfp);
+  esl_alphabet_Destroy(newabc);
+
+  if (esl_sprintf(&line, "MM    yes\nLENG  %d", hmm->M) != eslOK) esl_fatal(msg);
+  expect_eformat(msg, s, "LENG", line);
+
+  free(line);
+  free(s);
+  p7_hmm_Destroy(hmm);
+  return eslOK;
 }
 
 /* utest_io_30: tests read/write for 3.0 save files.
@@ -2649,6 +2739,10 @@ main(int argc, char **argv)
   utest_bad_header(r, nt_abc);
   utest_bad_h2_header(r, aa_abc, tmpfile);
   utest_bad_h2_header(r, nt_abc, tmpfile);
+  utest_cutoff_before_alph(r, aa_abc);
+  utest_cutoff_before_alph(r, nt_abc);
+  utest_mm_before_3f(r, aa_abc);
+  utest_mm_before_3f(r, nt_abc);
 
   /* Protein HMMs */
   p7_hmm_Sample(r, M, aa_abc, &hmm);
