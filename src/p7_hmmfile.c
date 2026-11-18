@@ -1719,6 +1719,7 @@ read_asc20hmm(P7_HMMFILE *hfp, ESL_ALPHABET **ret_abc, P7_HMM **opt_hmm)
   char         *tok2 = NULL;
   char         *tok3 = NULL;
   float         null[p7_MAXABET];
+  int           saw_nule = FALSE;  // miint: null[] is set only by a NULE line
   int           alphatype;
   int           k,x;
   off_t         offset = 0;
@@ -1867,6 +1868,7 @@ read_asc20hmm(P7_HMMFILE *hfp, ESL_ALPHABET **ret_abc, P7_HMM **opt_hmm)
           if ((status = esl_fileparser_GetTokenOnLine(hfp->efp, &tok1, NULL))   != eslOK)  ESL_XFAIL(eslEFORMAT, hfp->errbuf, "Too few fields on NULE line");
           null[x] = h2ascii2prob(tok1, 1./(float)abc->K);
         }
+        saw_nule = TRUE;
       }
 
       else if (strcmp(tag, "HMM") == 0) 
@@ -1875,6 +1877,7 @@ read_asc20hmm(P7_HMMFILE *hfp, ESL_ALPHABET **ret_abc, P7_HMM **opt_hmm)
   if (status != eslOK) goto ERROR;
   if (abc == NULL)     ESL_XFAIL(eslEFORMAT, hfp->errbuf, "No alphabet defined (no ALPH line?)");  // miint: as read_asc30hmm() (7eda1785); CreateBody() needs it
   if (hmm->M <= 0)     ESL_XFAIL(eslEFORMAT, hfp->errbuf, "No LENG found for HMM (or LENG <= 0)");  // miint: checked here, not just at the end; CreateBody() throws on M=0
+  if (! saw_nule)      ESL_XFAIL(eslEFORMAT, hfp->errbuf, "No NULE line (null model emissions)");  // miint: null[] converts the match scores below
 
 
   /* Skip main model header lines; allocate body of HMM now that K,M are known */
