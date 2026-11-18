@@ -1339,6 +1339,7 @@ read_asc30hmm(P7_HMMFILE *hfp, ESL_ALPHABET **ret_abc, P7_HMM **opt_hmm)
       } 
 
       else if (strcmp(tag, "MM") == 0) {
+	if (hfp->format < p7_HMMFILE_3f)                                               ESL_XFAIL(eslEFORMAT, hfp->errbuf, "MM line in a file older than HMMER3/f");  // miint: the MM column is read only in 3/f files, so mm[] would stay unset
 	if ((status = esl_fileparser_GetTokenOnLine(hfp->efp, &tok1, NULL))   != eslOK)  ESL_XFAIL(eslEFORMAT, hfp->errbuf, "No yes/no found for MM line");
 	if      (strcasecmp(tok1, "yes") == 0)
 	  hmm->flags |= p7H_MMASK;
