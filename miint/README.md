@@ -62,6 +62,7 @@ In an existing clone, run `git submodule update --init`.
 | `783504b5` | miint | Both text parsers check for a LENG line before `p7_hmm_CreateBody()`, which throws on M=0. The check used to run only after the body was parsed. | `utest_bad_header` and `utest_bad_h2_header`: before, an abort with "model length M=0 out of range 1..100000". |
 | `a97dc15c` | miint | `read_asc20hmm()` requires a NULE line. Without one, the null emissions that convert a HMMER2 profile's match scores were used uninitialized. | `utest_bad_h2_header`: before, calibration aborted on "forward score is NaN"; valgrind traces the uninitialised values to `read_asc20hmm()`'s stack. |
 | `cfa5ea0e` | miint | `read_asc30hmm()` rejects an MM line in a file older than HMMER3/f. Only 3/f files carry the per-node MM column, so in an older file `MM yes` left `mm[1..M]` uninitialized, and the read returned `eslOK`. | `utest_mm_before_3f`: before, "status 0, not eslEFORMAT". |
+| `8bf63add` | miint | Points the submodule at Easel without `register` in `esl_neon.h` and `esl_sse.h`. C++17 removed the storage class, and Clang rejected it when duckdb-miint's C++ code included `hmmer.h`. | Easel's `miint/check.sh` `cxx17-simd-header`; HMMER's and Easel's `make check` on arm64 (NEON). |
 
 Housekeeping commits sit among them: `.gitignore` entries, a refactor of the parser tests' shared must-fail check
 into `expect_eformat()`, this README, and a submodule bump for the Easel README.
